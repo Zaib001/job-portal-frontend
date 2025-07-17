@@ -52,7 +52,7 @@ const Navbar = () => {
 
         {/* Right: CTA Button */}
         <Link
-          to="/register"
+          to="/login"
           className="hidden md:inline-block bg-indigo-600 text-white text-sm font-semibold px-5 py-2 rounded-md hover:bg-indigo-700 transition"
         >
           Ready to Get Started?
