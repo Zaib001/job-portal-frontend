@@ -11,6 +11,8 @@ import ProtectedRoute from "./routes/ProtectedRoute";
 import VerifyOtp from "./components/VerifyOtp";
 import TurnkeyHiring from "./components/TurnkeyHiring";
 import Dashboard from "./pages/Dashboard/Dashboard";
+import CandidateView from "./pages/Dashboard/Admin/CandidateView";
+import RecruiterView from "./pages/Dashboard/Admin/RecruiterView";
 
 function App() {
   return (
@@ -45,6 +47,8 @@ function AppContent() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="candidate" element={<CandidateView />} />
+            <Route path="recruiter" element={<RecruiterView />} />
         <Route path="/verify-otp" element={<VerifyOtp />} />
         <Route path="/hiring" element={<TurnkeyHiring />} />
         <Route

@@ -9,6 +9,8 @@ import {
   FaPlus,
   FaEye,
   FaEyeSlash,
+  FaChevronDown,
+  FaChevronUp,
   FaColumns,
 } from "react-icons/fa";
 import {
@@ -89,6 +91,126 @@ const Salaries = () => {
       actions: true,
     };
   });
+  const [salaryPreview, setSalaryPreview] = useState(null);
+  const [workingDays, setWorkingDays] = useState(0);
+  const [salaryBreakdown, setSalaryBreakdown] = useState({
+    basePay: 0,
+    bonus: 0,
+    ptoDeduction: 0,
+    finalPay: 0,
+    hourlyRate: 0
+  });
+
+  const [activeTab, setActiveTab] = useState("basic");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+
+  // Calculate working days for the selected month
+  useEffect(() => {
+    if (form.month) {
+      const [year, month] = form.month.split('-').map(Number);
+      const daysInMonth = new Date(year, month, 0).getDate();
+      let workingDaysCount = 0;
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month - 1, day);
+        if (date.getDay() !== 0 && date.getDay() !== 6) { // Skip weekends
+          workingDaysCount++;
+        }
+      }
+
+      setWorkingDays(workingDaysCount);
+    }
+  }, [form.month]);
+
+  // Calculate salary preview when form changes
+  useEffect(() => {
+    const calculatePreview = async () => {
+      if (!form.userId || !form.month) return;
+
+      try {
+        const response = await API.get(`/api/admin/users/${form.userId}`);
+        const user = response.data.user;
+
+        let basePay = 0;
+        let bonus = 0;
+        let ptoDeduction = 0;
+        let finalPay = 0;
+        let hourlyRate = 0;
+
+        if (user.role === "recruiter") {
+          // Recruiter calculation
+          basePay = form.base || 0;
+          hourlyRate = basePay / (workingDays * 8);
+
+          // Bonus calculation
+          if (form.bonusAmount && form.bonusAmount > 0) {
+            if (form.bonusType === "one-time") {
+              bonus = parseFloat(form.bonusAmount);
+            } else if (form.bonusStartDate && form.bonusEndDate) {
+              const currentMonth = new Date(form.month + '-01');
+              const startDate = new Date(form.bonusStartDate);
+              const endDate = new Date(form.bonusEndDate);
+
+              if (currentMonth >= startDate && currentMonth <= endDate) {
+                bonus = parseFloat(form.bonusAmount);
+              }
+            }
+          }
+
+          // PTO deduction
+          const allowedPTO = form.ptoDaysAllocated || 0;
+          const offDays = form.offDays || 0;
+          const unpaidDays = Math.max(0, offDays - allowedPTO);
+          ptoDeduction = unpaidDays * (basePay / workingDays);
+
+          finalPay = basePay + bonus - ptoDeduction;
+        } else {
+          // Candidate calculation
+          const joined = new Date(user.joiningDate);
+          const currentDate = new Date(form.month + '-01');
+          const monthsWorked = (currentDate.getFullYear() - joined.getFullYear()) * 12 +
+            (currentDate.getMonth() - joined.getMonth());
+          const shouldUsePercentage = monthsWorked >= (form.percentagePayAfterMonths || 6);
+
+          if (!shouldUsePercentage) {
+            // Fixed pay mode
+            basePay = (form.base || 0) / (form.mode === "annum" ? 12 : 1);
+            hourlyRate = basePay / (workingDays * 8);
+            finalPay = (workingDays * 8) * hourlyRate;
+          } else {
+            // Percentage pay mode
+            const clientRate = form.vendorBillRate || 0;
+            const percentage = form.candidateShare || 0;
+            hourlyRate = clientRate * (percentage / 100);
+            finalPay = (workingDays * 8) * hourlyRate;
+          }
+
+          // PTO deduction for candidates
+          if (form.enablePTO) {
+            const allowedPTO = form.ptoDaysAllocated || 0;
+            const offDays = form.offDays || 0;
+            const unpaidDays = Math.max(0, offDays - allowedPTO);
+            ptoDeduction = unpaidDays * 8 * hourlyRate;
+            finalPay -= ptoDeduction;
+          }
+        }
+
+        setSalaryBreakdown({
+          basePay: +basePay.toFixed(2),
+          bonus: +bonus.toFixed(2),
+          ptoDeduction: +ptoDeduction.toFixed(2),
+          finalPay: +finalPay.toFixed(2),
+          hourlyRate: +hourlyRate.toFixed(2)
+        });
+
+      } catch (err) {
+        console.error("Failed to calculate preview", err);
+      }
+    };
+
+    calculatePreview();
+  }, [form, workingDays]);
 
   useEffect(() => {
     const fetchProjections = async () => {
@@ -229,38 +351,29 @@ const Salaries = () => {
   };
 
   const handleSave = async () => {
-    if (!form.userId) return toast.error("User is required.");
-    if (!form.month) return toast.error("Month is required.");
-    if (userRole === "recruiter" && (!form.base || form.base < 1000)) {
-      return toast.error("Base salary must be at least 1000.");
-    }
-
-    const payload = {
-      userId: form.userId,
-      month: form.month,
-      currency: form.currency,
-      mode: form.mode,
-      base: form.base,
-      payType: form.payType,
-      payTypeEffectiveDate: form.payTypeEffectiveDate,
-      fixedPhaseDuration: form.fixedPhaseDuration,
-      vendorBillRate: form.vendorBillRate,
-      candidateShare: form.candidateShare,
-      bonusAmount: form.bonusAmount,
-      bonusType: form.bonusType,
-      bonusFrequency: form.bonusFrequency,
-      bonusStartDate: form.bonusStartDate,
-      bonusEndDate: form.bonusEndDate,
-      isBonusRecurring: form.isBonusRecurring,
-      bonusEndMonth: form.bonusEndMonth,
-      enablePTO: form.enablePTO,
-      ptoType: form.ptoType,
-      ptoDaysAllocated: form.ptoDaysAllocated,
-      previewMonth: form.previewMonth,
-      customFields: form.customFields,
-    };
+    if (!form.userId) return toast.error("User is required");
+    if (!form.month) return toast.error("Month is required");
 
     try {
+      const payload = {
+        userId: form.userId,
+        month: form.month,
+        currency: form.currency,
+        base: form.base,
+        bonusAmount: form.bonusAmount,
+        bonusType: form.bonusType,
+        isBonusRecurring: form.isBonusRecurring,
+        bonusStartDate: form.bonusStartDate,
+        bonusEndDate: form.bonusEndDate,
+        enablePTO: form.enablePTO,
+        ptoDaysAllocated: form.ptoDaysAllocated,
+        payType: form.payType,
+        mode: form.mode,
+        vendorBillRate: form.vendorBillRate,
+        candidateShare: form.candidateShare,
+        salaryType: form.mode === "month" ? "monthly" : "yearly"
+      };
+
       if (mode === "edit") {
         await updateSalary(selectedSalary._id, payload);
         toast.success("Salary updated");
@@ -271,10 +384,11 @@ const Salaries = () => {
       setIsModalOpen(false);
       loadSalaries();
     } catch (err) {
-      console.log(err);
-      toast.error(mode === "edit" ? "Update failed" : "Add failed");
+      console.error(err);
+      toast.error(err.response?.data?.message || "Operation failed");
     }
   };
+
 
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this salary record?")) return;
@@ -388,6 +502,242 @@ const Salaries = () => {
       visibleColumns.customFields :
       visibleColumns[column.id] !== false
   );
+  const renderSalaryForm = () => {
+    return (
+      <div className="space-y-4">
+        {/* Basic Information Section */}
+        <div className="space-y-4">
+          <h4 className="font-medium text-gray-700 border-b pb-2">Basic Information</h4>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">User*</label>
+              <select
+                className="w-full border rounded px-3 py-2"
+                value={form.userId}
+                onChange={(e) => {
+                  const userId = e.target.value;
+                  const selected = users.find((u) => u._id === userId);
+                  setUserRole(selected?.role || "");
+                  setForm({ ...form, userId });
+                }}
+                required
+              >
+                <option value="">Select user</option>
+                {users.map((u) => (
+                  <option key={u._id} value={u._id}>
+                    {u.name} ({u.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Month*</label>
+              <input
+                type="month"
+                value={form.month}
+                onChange={(e) => setForm({ ...form, month: e.target.value })}
+                className="w-full border rounded px-3 py-2"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Currency*</label>
+              <select
+                className="w-full border rounded px-3 py-2"
+                value={form.currency}
+                onChange={(e) => setForm({ ...form, currency: e.target.value })}
+                required
+              >
+                <option value="USD">USD</option>
+                <option value="INR">INR</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Salary Mode*</label>
+              <div className="flex gap-2">
+                {["month", "annum"].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setForm({ ...form, mode: m })}
+                    className={`px-3 py-1 rounded border text-sm ${form.mode === m
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-white text-gray-700 border-gray-300"
+                      }`}
+                  >
+                    {m === "month" ? "Monthly" : "Annual"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Base Salary*</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.base}
+                onChange={(e) => setForm({ ...form, base: parseFloat(e.target.value) || 0 })}
+                className="w-full border rounded px-3 py-2"
+                required
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Bonus Section */}
+        <div className="space-y-4">
+          <h4 className="font-medium text-gray-700 border-b pb-2">Bonus Information</h4>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Bonus Amount</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.bonusAmount}
+                onChange={(e) => setForm({ ...form, bonusAmount: parseFloat(e.target.value) || 0 })}
+                className="w-full border rounded px-3 py-2"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Bonus Type</label>
+              <select
+                className="w-full border rounded px-3 py-2"
+                value={form.bonusType}
+                onChange={(e) => setForm({ ...form, bonusType: e.target.value })}
+              >
+                <option value="one-time">One-time</option>
+                <option value="recurring">Recurring</option>
+              </select>
+            </div>
+
+            {form.bonusType === "recurring" && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Bonus Start Date</label>
+                  <input
+                    type="date"
+                    value={form.bonusStartDate}
+                    onChange={(e) => setForm({ ...form, bonusStartDate: e.target.value })}
+                    className="w-full border rounded px-3 py-2"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Bonus End Date</label>
+                  <input
+                    type="date"
+                    value={form.bonusEndDate}
+                    onChange={(e) => setForm({ ...form, bonusEndDate: e.target.value })}
+                    className="w-full border rounded px-3 py-2"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* PTO Section */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b pb-2">
+            <h4 className="font-medium text-gray-700">PTO Settings</h4>
+            <label className="flex items-center space-x-2">
+              <span className="text-sm">Enable PTO</span>
+              <input
+                type="checkbox"
+                checked={form.enablePTO}
+                onChange={(e) => setForm({ ...form, enablePTO: e.target.checked })}
+                className="h-4 w-4 text-indigo-600 rounded"
+              />
+            </label>
+          </div>
+
+          {form.enablePTO && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">PTO Days Allocated</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={form.ptoDaysAllocated}
+                  onChange={(e) => setForm({ ...form, ptoDaysAllocated: parseFloat(e.target.value) || 0 })}
+                  className="w-full border rounded px-3 py-2"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Advanced Settings (Candidate Specific) */}
+        {userRole === "candidate" && (
+          <div className="space-y-4">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center justify-between w-full text-left font-medium text-gray-700 border-b pb-2"
+            >
+              <span>Advanced Settings (Candidate)</span>
+              {showAdvanced ? <FaChevronUp /> : <FaChevronDown />}
+            </button>
+
+            {showAdvanced && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Pay Type</label>
+                  <select
+                    className="w-full border rounded px-3 py-2"
+                    value={form.payType}
+                    onChange={(e) => setForm({ ...form, payType: e.target.value })}
+                  >
+                    <option value="fixed">Fixed</option>
+                    <option value="percentage">Percentage</option>
+                  </select>
+                </div>
+
+                {form.payType === "percentage" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Vendor Bill Rate</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.vendorBillRate}
+                        onChange={(e) => setForm({ ...form, vendorBillRate: parseFloat(e.target.value) || 0 })}
+                        className="w-full border rounded px-3 py-2"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Candidate Share (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={form.candidateShare}
+                        onChange={(e) => setForm({ ...form, candidateShare: parseFloat(e.target.value) || 0 })}
+                        className="w-full border rounded px-3 py-2"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -555,260 +905,65 @@ const Salaries = () => {
       )}
 
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 space-y-6">
-            <h3 className="text-lg font-bold mb-4">{mode === "edit" ? "Edit Salary" : "Add Salary"}</h3>
-            <div className="space-y-4 max-h-[80vh] overflow-y-auto">
-              {/* Select User */}
-              <div>
-                <label className="block text-sm font-medium">Select User</label>
-                <select
-                  className="w-full border rounded px-3 py-2 mt-1"
-                  value={form.userId}
-                  onChange={(e) => {
-                    const userId = e.target.value;
-                    const selected = users.find((u) => u._id === userId);
-                    setUserRole(selected?.role || "");
-                    setForm({ ...form, userId });
-                  }}
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6 space-y-6">
+              <div className="flex justify-between items-center border-b pb-4">
+                <h3 className="text-xl font-bold">
+                  {mode === "edit" ? "Edit Salary" : "Add Salary"}
+                </h3>
+                <button
+                  onClick={() => setIsModalOpen(false)}
+                  className="text-gray-500 hover:text-gray-700"
                 >
-                  <option value="">Select user</option>
-                  {users.map((u) => (
-                    <option key={u._id} value={u._id}>
-                      {u.name} ({u.email})
-                    </option>
-                  ))}
-                </select>
+                  ✕
+                </button>
               </div>
 
-              {/* Recruiter Fields */}
-              {userRole === "recruiter" && (
-                <>
-                  <label className="block text-sm font-medium">Base Salary</label>
-                  <input
-                    type="number"
-                    placeholder="Base Salary"
-                    value={form.base || ""}
-                    onChange={(e) =>
-                      setForm({ ...form, base: e.target.value === "" ? "" : Number(e.target.value) })
-                    }
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  />
-                  <label className="block text-sm font-medium mb-1">Salary Frequency</label>
-                  <div className="flex gap-2">
-                    {["month", "annum"].map((m) => (
-                      <button
-                        key={m}
-                        onClick={() => setForm({ ...form, mode: m })}
-                        className={`px-3 py-1 rounded border ${form.mode === m
-                          ? "bg-indigo-600 text-white border-indigo-600"
-                          : "bg-white text-gray-700 border-gray-300"
-                          }`}
-                      >
-                        {m === "month" ? "Per Month" : "Per Annum"}
-                      </button>
-                    ))}
-                  </div>
-                  <label className="block text-sm font-medium">Bonus</label>
-                  <input
-                    type="number"
-                    placeholder="Bonus"
-                    value={form.bonus || ""}
-                    onChange={(e) =>
-                      setForm({ ...form, bonus: e.target.value === "" ? "" : Number(e.target.value) })
-                    }
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  />
+              {renderSalaryForm()}
 
-                  <label className="block text-sm font-medium">Currency</label>
-                  <select
-                    value={form.currency}
-                    onChange={(e) => setForm({ ...form, currency: e.target.value })}
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  >
-                    <option value="USD">USD</option>
-                    <option value="INR">INR</option>
-                  </select>
-
-                  <label className="block text-sm font-medium">Month</label>
-                  <input
-                    type="month"
-                    value={form.month || ""}
-                    onChange={(e) => setForm({ ...form, month: e.target.value })}
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  />
-                </>
-              )}
-              {/* Candidate Fields */}
-              {userRole === "candidate" && (
-                <>
-                  <label className="block text-sm font-medium">Base Salary</label>
-                  <input
-                    type="number"
-                    placeholder="Base Salary"
-                    value={form.base || ""}
-                    onChange={(e) =>
-                      setForm({ ...form, base: e.target.value === "" ? "" : Number(e.target.value) })
-                    }
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  />
-
-                  <label className="block text-sm font-medium">Currency</label>
-                  <select
-                    value={form.currency}
-                    onChange={(e) => setForm({ ...form, currency: e.target.value })}
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  >
-                    <option value="USD">USD</option>
-                    <option value="INR">INR</option>
-                  </select>
-                  <label className="block text-sm font-medium">Month</label>
-                  <input
-                    type="month"
-                    value={form.month || ""}
-                    onChange={(e) => setForm({ ...form, month: e.target.value })}
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  />
-                  <label className="block text-sm font-medium">Pay Type</label>
-                  <div className="flex gap-2">
-                    {["fixed", "percentage"].map((type) => (
-                      <button
-                        key={type}
-                        onClick={() => setForm({ ...form, payType: type })}
-                        className={`px-3 py-1 rounded border ${form.payType === type
-                          ? "bg-indigo-600 text-white border-indigo-600"
-                          : "bg-white text-gray-700 border-gray-300"
-                          }`}
-                      >
-                        {type === "fixed" ? "Fixed" : "Percentage"}
-                      </button>
-                    ))}
-                  </div>
-
-                  {form.payType === "percentage" && (
-                    <>
-                      <label className="block text-sm font-medium">Pay Type Effective Date</label>
-                      <input
-                        type="date"
-                        value={form.payTypeEffectiveDate || ""}
-                        onChange={(e) => setForm({ ...form, payTypeEffectiveDate: e.target.value })}
-                        className="w-full border rounded px-3 py-2 mt-1"
-                      />
-
-                      <label className="block text-sm font-medium">Fixed Phase Duration (Months)</label>
-                      <input
-                        type="number"
-                        placeholder="Duration in months"
-                        value={form.fixedPhaseDuration || ""}
-                        onChange={(e) => setForm({ ...form, fixedPhaseDuration: e.target.value })}
-                        className="w-full border rounded px-3 py-2 mt-1"
-                      />
-                    </>
-                  )}
-
-                  <label className="block text-sm font-medium">Bonus Amount</label>
-                  <input
-                    type="number"
-                    value={form.bonusAmount || ""}
-                    onChange={(e) => setForm({ ...form, bonusAmount: e.target.value })}
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  />
-
-                  <label className="block text-sm font-medium">Bonus Type</label>
-                  <select
-                    value={form.bonusType}
-                    onChange={(e) => setForm({ ...form, bonusType: e.target.value })}
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  >
-                    <option value="one-time">One-time</option>
-                    <option value="recurring">Recurring</option>
-                  </select>
-
-                  {form.bonusType === "recurring" && (
-                    <>
-                      <label className="block text-sm font-medium">Bonus Frequency</label>
-                      <select
-                        value={form.bonusFrequency}
-                        onChange={(e) => setForm({ ...form, bonusFrequency: e.target.value })}
-                        className="w-full border rounded px-3 py-2 mt-1"
-                      >
-                        <option value="monthly">Monthly</option>
-                        <option value="quarterly">Quarterly</option>
-                        <option value="annually">Annually</option>
-                      </select>
-                    </>
-                  )}
-
-                  <label className="block text-sm font-medium">Bonus Start Date</label>
-                  <input
-                    type="date"
-                    value={form.bonusStartDate || ""}
-                    onChange={(e) => setForm({ ...form, bonusStartDate: e.target.value })}
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  />
-
-                  <label className="block text-sm font-medium">Bonus End Date</label>
-                  <input
-                    type="date"
-                    value={form.bonusEndDate || ""}
-                    onChange={(e) => setForm({ ...form, bonusEndDate: e.target.value })}
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  />
-
-                  <label className="block text-sm font-medium">Enable PTO Policy</label>
-                  <input
-                    type="checkbox"
-                    checked={form.enablePTO}
-                    onChange={(e) => setForm({ ...form, enablePTO: e.target.checked })}
-                  />
-
-                  <label className="block text-sm font-medium">PTO Type</label>
-                  <select
-                    value={form.ptoType}
-                    onChange={(e) => setForm({ ...form, ptoType: e.target.value })}
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  >
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
-                  </select>
-
-                  <label className="block text-sm font-medium">PTO Days Allocated</label>
-                  <input
-                    type="number"
-                    value={form.ptoDaysAllocated || ""}
-                    onChange={(e) => setForm({ ...form, ptoDaysAllocated: e.target.value })}
-                    className="w-full border rounded px-3 py-2 mt-1"
-                  />
-                </>
-              )}
-
+              {/* Salary Projections */}
               {projections.length > 0 && (
-                <div className="bg-white p-6 mt-6 rounded shadow">
-                  <h3 className="text-xl font-bold mb-4">Future Salary Projections</h3>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={projections}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="finalPay" stroke="#6366f1" strokeWidth={2} />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div className="mt-6">
+                  <h4 className="font-medium text-gray-700 border-b pb-2 mb-4">
+                    Salary Projections
+                  </h4>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <ResponsiveContainer width="100%" height={300}>
+                      <LineChart data={projections}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="month" />
+                        <YAxis />
+                        <Tooltip
+                          formatter={(value) => [`${form.currency} ${value.toFixed(2)}`, "Amount"]}
+                          labelFormatter={(label) => `Month: ${label}`}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="finalPay"
+                          stroke="#6366f1"
+                          strokeWidth={2}
+                          name="Projected Salary"
+                          dot={{ r: 4 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
               )}
 
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-3 pt-4 border-t">
                 <button
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSave}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition"
                 >
-                  Save
+                  {mode === "edit" ? "Update Salary" : "Add Salary"}
                 </button>
               </div>
             </div>
