@@ -48,7 +48,7 @@ function AppContent() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="candidate" element={<CandidateView />} />
-            <Route path="recruiter" element={<RecruiterView />} />
+        <Route path="recruiter" element={<RecruiterView />} />
         <Route path="/verify-otp" element={<VerifyOtp />} />
         <Route path="/hiring" element={<TurnkeyHiring />} />
         <Route
